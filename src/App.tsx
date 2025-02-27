@@ -37,6 +37,8 @@ type MachineState = {
   currentDeposit: number;
   cadPerPol: number;
   cadPerBtc: number;
+  cadPerL2Eth: number;
+  cadPerHype: number;
   currentBtcToRecv: number;
   currentL2EthToRecv: number;
   currentPolToRecv: number;
@@ -86,7 +88,13 @@ enum PageState {
   BUYING_L2_ETH_INSERT_BILL,
   BUYING_L2_ETH_SCAN_ADDRESS,
   BUYING_L2_ETH_SENDING_TX,
-  BUYING_L2_ETH_TX_RECEIPT
+  BUYING_L2_ETH_TX_RECEIPT,
+
+  // hype
+  BUYING_HYPE_INSERT_BILL,
+  BUYING_HYPE_SCAN_ADDRESS,
+  BUYING_HYPE_SENDING_TX,
+  BUYING_HYPE_TX_RECEIPT
 }
 
 function App() {
@@ -96,8 +104,10 @@ function App() {
   const [machineState, setMachineState] = useState<null | MachineState>(null);
   const [pageState, setPageState] = useState<PageState>(PageState.MAIN);
 
-  // ad-hoc: shit I know, to be removed during refactoring
-  const [nextPageState, setNextPageState] = useState<{ state: PageState | null, data?: any }>({ state: null });
+  // ad-hoc: it's meh, I know, to be removed during refactoring
+  const [nextPageState, setNextPageState] = useState<{
+    state: PageState | null, nextState: PageState | null, data?: any
+  }>({ state: null, nextState: null });
 
   const [finishDepositResp, setFinishDepositResp] =
     useState<null | FinishDepositResp>(null);
@@ -111,6 +121,9 @@ function App() {
   const [isReturnDialogOpen, setIsReturnDialogOpen] = useState(false);
 
   const [isConfirmAddressDialogOpen, setIsConfirmAddressDialogOpen] =
+    useState<boolean>(false);
+
+  const [isFeeWarningOpen, setIsFeeWarningOpen] =
     useState<boolean>(false);
 
   // Yes very dirty but whatever
@@ -133,7 +146,8 @@ function App() {
       pageState === PageState.BUYING_POL_INSERT_BILL ||
       pageState === PageState.CHECK_MEMBERSHIP_INSERT_BILL ||
       pageState === PageState.BUYING_L2_ETH_INSERT_BILL ||
-      pageState === PageState.BUYING_BITCOIN_INSERT_BILL
+      pageState === PageState.BUYING_BITCOIN_INSERT_BILL ||
+      pageState === PageState.BUYING_HYPE_INSERT_BILL
     ) {
       fetch(`${ATM_BACKEND_URL}/deposit/cancel`, { method: "POST" }).catch(
         (e) => {
@@ -144,7 +158,7 @@ function App() {
 
     setRecipientAddress(null);
     setPageState(PageState.MAIN);
-    setNextPageState({ state: null });
+    setNextPageState({ state: null, nextState: null });
     setIsReturnDialogOpen(false);
   }, [pageState]);
 
@@ -154,7 +168,8 @@ function App() {
 
     if (nextPageState.state) {
       setPageState(nextPageState.state);
-      setNextPageState({ state: PageState.BUYING_L2_ETH_SENDING_TX, data: nextPageState.data });
+      // set next page state to sending tx
+      setNextPageState({ state: nextPageState.nextState, nextState: null, data: nextPageState.data });
     } else if (address.includes('@')) {
       setPageState(PageState.BUYING_BITCOIN_INSERT_BILL);
     } else {
@@ -246,6 +261,28 @@ function App() {
       });
   }, []);
 
+  const finalizeDepositAndSendHype = useCallback(async (recipientAddress: string, endDepositEndpoint: string) => {
+    setPageState(PageState.BUYING_HYPE_SENDING_TX);
+
+    fetch(endDepositEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        recipient: recipientAddress,
+      }),
+    })
+      .then(async (resp) => {
+        const respJ = await resp.json();
+        setFinishDepositResp(respJ as FinishDepositResp);
+        setPageState(PageState.BUYING_HYPE_TX_RECEIPT);
+      })
+      .catch((e) => {
+        alert(`An error occurred ${e || "unknown"}`);
+      });
+  }, []);
+
   const finalizeDepositAndUpdateMembership = useCallback(async () => {
     setPageState(PageState.CHECK_MEMBERSHIP_EXTENDING);
     fetch(`${ATM_BACKEND_URL}/deposit/end/membership`, {
@@ -290,6 +327,26 @@ function App() {
 
   return (
     <>
+      <DialogConfirm
+        title="Fees May Apply"
+        bodyText="Hyperliquid charges a fee equivalent to 1 USD for deposits to new accounts. Press YES to continue."
+        isOpen={isFeeWarningOpen}
+        onConfirm={() => {
+          setPageState(PageState.BUYING_HYPE_SCAN_ADDRESS);
+          setNextPageState({
+            state: PageState.BUYING_HYPE_INSERT_BILL,
+            nextState: PageState.BUYING_HYPE_SENDING_TX,
+            data: {
+              endDeposit: finalizeDepositAndSendHype,
+              endDepositEndpoint: `${ATM_BACKEND_URL}/deposit/end/hype`,
+              chain: { name: "Hype", tsym: "HYPE" },
+            }
+          })
+          setIsFeeWarningOpen(false)
+        }
+        }
+        onClose={() => setIsFeeWarningOpen(false)}
+      />
       <DialogConfirm
         title="Return Home?"
         bodyText="Do you really want to return home?"
@@ -357,9 +414,19 @@ function App() {
             ? prettyNumbers(machineState.cadPerBtc)
             : "--"}
           <br />
+          1 ETH = CAD $
+          {machineState !== null
+            ? prettyNumbers(machineState.cadPerL2Eth)
+            : "--"}
+          <br />
           1 POL = CAD $
           {machineState !== null
             ? prettyNumbers(machineState.cadPerPol)
+            : "--"}
+          <br />
+          1 HYPE = CAD $
+          {machineState !== null
+            ? prettyNumbers(machineState.cadPerHype)
             : "--"}
         </Typography>
         <br />
@@ -444,7 +511,9 @@ function App() {
               onClick={() => {
                 setPageState(PageState.BUYING_L2_ETH_SCAN_ADDRESS);
                 setNextPageState({
-                  state: PageState.BUYING_L2_ETH_INSERT_BILL, data: {
+                  state: PageState.BUYING_L2_ETH_INSERT_BILL,
+                  nextState: PageState.BUYING_L2_ETH_SENDING_TX,
+                  data: {
                     endDeposit: finalizeDepositAndSendL2Eth,
                     endDepositEndpoint: `${ATM_BACKEND_URL}/deposit/end/arbitrum`,
                     chain: { name: "Arbitrum" }
@@ -468,7 +537,9 @@ function App() {
               onClick={() => {
                 setPageState(PageState.BUYING_L2_ETH_SCAN_ADDRESS);
                 setNextPageState({
-                  state: PageState.BUYING_L2_ETH_INSERT_BILL, data: {
+                  state: PageState.BUYING_L2_ETH_INSERT_BILL,
+                  nextState: PageState.BUYING_L2_ETH_SENDING_TX,
+                  data: {
                     endDeposit: finalizeDepositAndSendL2Eth,
                     endDepositEndpoint: `${ATM_BACKEND_URL}/deposit/end/optimism`,
                     chain: { name: "Optimism" }
@@ -492,7 +563,9 @@ function App() {
               onClick={() => {
                 setPageState(PageState.BUYING_L2_ETH_SCAN_ADDRESS);
                 setNextPageState({
-                  state: PageState.BUYING_L2_ETH_INSERT_BILL, data: {
+                  state: PageState.BUYING_L2_ETH_INSERT_BILL,
+                  nextState: PageState.BUYING_L2_ETH_SENDING_TX,
+                  data: {
                     endDeposit: finalizeDepositAndSendL2Eth,
                     endDepositEndpoint: `${ATM_BACKEND_URL}/deposit/end/base`,
                     chain: { name: "Base" }
@@ -502,6 +575,16 @@ function App() {
             >
               <img src={process.env.PUBLIC_URL + '/logos/base_logo.svg'} width="40" height="40" />
               BASE ETH <br />
+            </StackVerticalButton>
+            &nbsp;&nbsp;
+            <StackVerticalButton
+              disabled={undefined}
+              variant="contained"
+              color="info"
+              onClick={() => setIsFeeWarningOpen(true)}
+            >
+              <img src={process.env.PUBLIC_URL + '/logos/hl_sym.svg'} width="40" height="40" />
+              HYPE <br />
             </StackVerticalButton>
 
             &nbsp;&nbsp;
@@ -734,6 +817,48 @@ function App() {
             </div>
           </>
         )}
+
+        {pageState === PageState.BUYING_HYPE_SCAN_ADDRESS && (
+          <>
+            <div style={{ width: "400px", margin: "auto" }}>
+              <Typography variant="h6">
+                SCANNING ETHEREUM ADDRESS QR CODE ({nextPageState.data?.chain ? nextPageState.data?.chain.name : "l2 chain"})
+              </Typography>
+              <QrReader
+                ViewFinder={ViewFinder}
+                videoId="video"
+                scanDelay={500}
+                constraints={{ facingMode: "user" }}
+                onResult={(result, error) => {
+                  if (!!result) {
+                    let txt = result.getText();
+
+                    if (txt.startsWith("ethereum:")) {
+                      try {
+                        txt = txt.replace("ethereum:", "").slice(0, 42);
+                      } catch (e) { }
+                    }
+
+                    // Is an address
+                    if (txt.startsWith("0x") && txt.length === 42) {
+                      setQrCodeData(txt);
+                      setNextPageState({
+                        state: PageState.BUYING_HYPE_INSERT_BILL,
+                        nextState: PageState.BUYING_HYPE_SENDING_TX,
+                        data: nextPageState.data
+                      })
+                      setIsConfirmAddressDialogOpen(true);
+                    }
+                  }
+
+                  if (!!error) {
+                    console.info("qr-code", error);
+                  }
+                }}
+              />
+            </div>
+          </>
+        )}
         {pageState === PageState.BUYING_L2_ETH_SCAN_ADDRESS && (
           <>
             <div style={{ width: "400px", margin: "auto" }}>
@@ -758,7 +883,11 @@ function App() {
                     // Is an address
                     if (txt.startsWith("0x") && txt.length === 42) {
                       setQrCodeData(txt);
-                      setNextPageState({ state: PageState.BUYING_L2_ETH_INSERT_BILL, data: nextPageState.data })
+                      setNextPageState({
+                        state: PageState.BUYING_L2_ETH_INSERT_BILL,
+                        nextState: PageState.BUYING_L2_ETH_SENDING_TX,
+                        data: nextPageState.data
+                      })
                       setIsConfirmAddressDialogOpen(true);
                     }
                   }
@@ -768,7 +897,6 @@ function App() {
                   }
                 }}
               />
-
             </div>
           </>
         )}
@@ -797,6 +925,51 @@ function App() {
               variant="contained"
               onClick={() => {
                 setIsDoneDepositingBtcOpen(true);
+              }}
+              color="success"
+            >
+              <ThumbUpOffAltIcon style={{ fontSize: "50px" }} />
+              DONE
+            </StackVerticalButton>
+          </>
+        )}
+        {pageState === PageState.BUYING_HYPE_INSERT_BILL && (
+          <>
+
+            <Typography variant="h5" color="primary" fontWeight="bold"
+              sx={{ backgroundColor: 'rgba(255, 60, 0, 0.1)', padding: '10px', borderRadius: '5px' }}
+            >
+              HYPE L1 may charge a 1 USD fee when depositing to new accounts.
+            </Typography>
+
+            <div style={{ marginTop: "15px" }} />
+            <Typography variant="h5">
+
+              FEED CAD BILLS INTO MACHINE
+            </Typography>
+            <Typography variant="subtitle1">
+              Recipient address: {recipientAddress || "--"}
+            </Typography>
+
+            <div style={{ marginTop: "15px" }} />
+
+            <Typography variant="h5">
+              INSERTED CAD: $
+              {machineState === null
+                ? "--"
+                : machineState.currentDeposit.toString()}
+            </Typography>
+            <Typography variant="h5">
+              {nextPageState.data.chain.tsym} TO RECEIVE: ~
+              {machineState !== null
+                ? prettyNumbers(machineState.currentL2EthToRecv)
+                : "--"}
+            </Typography>
+            <StackVerticalButton
+              style={{ marginTop: "20px", height: "125px" }}
+              variant="contained"
+              onClick={() => {
+                setIsDoneDepositingOpen(true);
               }}
               color="success"
             >
@@ -886,6 +1059,14 @@ function App() {
             <CircularProgress />
           </>
         )}
+        {pageState === PageState.BUYING_HYPE_SENDING_TX && (
+          <>
+            <Typography variant="h5">
+              CONFIRMING DEPOSIT AND SENDING HYPE...
+            </Typography>
+            <CircularProgress />
+          </>
+        )}
         {pageState === PageState.BUYING_BITCOIN_TX_RECEIPT && (
           <>
             <div style={{ maxWidth: "400px", wordBreak: "break-all" }}>
@@ -926,6 +1107,28 @@ function App() {
             </Typography>
             <Typography variant="subtitle1">
               Received ETH:{" "}
+              {finishDepositResp !== null
+                ? prettyNumbers(finishDepositResp.totalCryptoToRecv)
+                : "--"}
+            </Typography>
+            {finishDepositResp?.explorerTx && (
+              <QRCode
+                value={finishDepositResp.explorerTx}
+              />)
+            }
+          </>
+        )}
+        {pageState === PageState.BUYING_HYPE_TX_RECEIPT && (
+          <>
+            <Typography variant="h5">HYPE SENT</Typography>
+            <Typography variant="subtitle1">
+              Deposited CAD:{" "}
+              {finishDepositResp !== null
+                ? prettyNumbers(finishDepositResp.totalDepositCAD)
+                : "--"}
+            </Typography>
+            <Typography variant="subtitle1">
+              Received HYPE:{" "}
               {finishDepositResp !== null
                 ? prettyNumbers(finishDepositResp.totalCryptoToRecv)
                 : "--"}
