@@ -42,6 +42,7 @@ type MachineState = {
   currentBtcToRecv: number;
   currentL2EthToRecv: number;
   currentPolToRecv: number;
+  currentHypeToRecv: number;
   currency: string;
   membershipCadPer30Days: number;
   curMembershipTimeExtend: number;
@@ -962,7 +963,7 @@ function App() {
             <Typography variant="h5">
               {nextPageState.data.chain.tsym} TO RECEIVE: ~
               {machineState !== null
-                ? prettyNumbers(machineState.currentL2EthToRecv)
+                ? prettyNumbers(machineState.currentHypeToRecv)
                 : "--"}
             </Typography>
             <StackVerticalButton
