@@ -57,6 +57,7 @@ type FinishDepositResp = {
   totalCryptoToRecv: number;
   totalDepositCAD: number;
   explorerTx: string;
+  recipientPrimaryName?: string | null;
 };
 
 type FobUserState = {
@@ -114,6 +115,7 @@ function App() {
     useState<null | FinishDepositResp>(null);
   const [recipientAddress, setRecipientAddress] = useState<string | null>(null);
   const [qrCodeData, setQrCodeData] = useState<string>("");
+  const [recipientHLName, setRecipientHLName] = useState<string | null>(null);
 
   const [isDoneDepositingOpen, setIsDoneDepositingOpen] = useState(false);
   const [isDoneDepositingBtcOpen, setIsDoneDepositingBtcOpen] = useState(false);
@@ -303,6 +305,27 @@ function App() {
         alert(`An error occurred ${e || "unknown"}`);
       });
   }, [keyFobId, getFobUserStats]);
+
+  const onAddressScanned = useCallback(async (address: string) => {
+    setQrCodeData(address);
+
+    // If this is Hype transaction, resolve HL Name (Primary Name)
+    if (nextPageState?.data?.chain?.name === "Hype") {
+      try {
+        const statsData = await fetch(`${ATM_BACKEND_URL}/stats`).then(x => x.json());
+        if (statsData.resolveHypeName) {
+          const hlName = await statsData.resolveHypeName(address);
+          setRecipientHLName(hlName);
+        }
+      } catch (error) {
+        console.error("Error resolving HL name:", error);
+      }
+    }
+
+    setNextPageState({ state: PageState.BUYING_HYPE_INSERT_BILL, data: nextPageState.data });
+    setIsConfirmAddressDialogOpen(true);
+  }, [nextPageState]);
+
   useEffect(() => {
     if (pageState === PageState.CHECK_MEMBERSHIP) {
       document.addEventListener("keydown", handleRFIDKeyDown as any);
@@ -325,6 +348,13 @@ function App() {
     getMachineState();
     setInterval(getMachineState, 2500);
   }, [getMachineState, machineState]);
+
+  useEffect(() => {
+    // Reset HL name when dialog closes
+    if (!isConfirmAddressDialogOpen) {
+      setRecipientHLName(null);
+    }
+  }, [isConfirmAddressDialogOpen]);
 
   return (
     <>
@@ -357,7 +387,7 @@ function App() {
       />
       <DialogConfirm
         title="Confirm Your Address"
-        bodyText={`Confirm that ${qrCodeData} is your address?`}
+        bodyText={`Confirm that ${qrCodeData}${recipientHLName ? ` (${recipientHLName})` : ''} is your address?`}
         isOpen={isConfirmAddressDialogOpen}
         onConfirm={() => confirmUserAddressAndProceed(qrCodeData)}
         onClose={() => setIsConfirmAddressDialogOpen(false)}
@@ -849,6 +879,7 @@ function App() {
                         data: nextPageState.data
                       })
                       setIsConfirmAddressDialogOpen(true);
+                      onAddressScanned(txt);
                     }
                   }
 
