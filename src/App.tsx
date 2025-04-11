@@ -185,12 +185,19 @@ function App() {
   }, [nextPageState]);
 
   const getMachineState = useCallback(async () => {
-    const resp = await fetch(`${ATM_BACKEND_URL}/stats`).then((x) => {
-      return x.json()
+    if (!recipientAddress) {
+      const resp = await fetch(`${ATM_BACKEND_URL}/stats`).then((x) => x.json());
+      setMachineState(resp as MachineState);
+      return;
     }
-    );
+
+    const resp = await fetch(`${ATM_BACKEND_URL}/stats?address=${recipientAddress}`).then((x) => x.json());
     setMachineState(resp as MachineState);
-  }, []);
+
+    if (resp.resolvedHypeName) {
+      setRecipientHLName(resp.resolvedHypeName);
+    }
+  }, [recipientAddress]);
 
   const getFobUserStats = useCallback(async () => {
     const resp = await fetch(
